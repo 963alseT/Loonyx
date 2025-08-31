@@ -14,6 +14,9 @@
 #define ENTER_KEY_CODE 0x1C
 #define BACKSPACE_CODE 0x0E
 
+#define VGA_COMMAND_PORT 0x3D4
+#define VGA_DATA_PORT    0x3D5
+
 #define INPUT_BUFFER_SIZE 128
 char input_buffer[INPUT_BUFFER_SIZE];
 int input_index = 0;
@@ -65,6 +68,18 @@ static void scroll_if_needed(void)
     current_loc -= line_bytes;
 }
 
+void move_cursor() {
+    int pos = current_loc / 2;
+
+    // send high byte
+    write_port(VGA_COMMAND_PORT, 14);
+    write_port(VGA_DATA_PORT, (pos >> 8) & 0xFF);
+
+    // send low byte
+    write_port(VGA_COMMAND_PORT, 15);
+    write_port(VGA_DATA_PORT, pos & 0xFF);
+}
+
 int strcmp(const char *s1, const char *s2) {
     while (*s1 && (*s1 == *s2)) {
         s1++;
@@ -73,6 +88,27 @@ int strcmp(const char *s1, const char *s2) {
     return *(unsigned char *)s1 - *(unsigned char *)s2;
 }
 
+int strlen(const char *s) {
+    int len = 0;
+    while (s[len] != '\0') {
+        len++;
+    }
+    return len;
+}
+
+int strncmp(const char *s1, const char *s2, int n) {
+    int i = 0;
+    while (i < n && s1[i] != '\0' && s2[i] != '\0') {
+        if (s1[i] != s2[i]) {
+            return (unsigned char)s1[i] - (unsigned char)s2[i];
+        }
+        i++;
+    }
+    if (i == n) {
+        return 0;
+    }
+    return (unsigned char)s1[i] - (unsigned char)s2[i];
+}
 
 void idt_init(void)
 {
@@ -137,12 +173,14 @@ void kprint(const char *str)
         vidptr[current_loc++] = 0x07;
         scroll_if_needed();
     }
+    move_cursor();
 }
 
 void kprint_newline(void)
 {
     unsigned int line_size = BYTES_FOR_EACH_ELEMENT * COLUMNS_IN_LINE;
     current_loc = current_loc + (line_size - current_loc % (line_size));
+    move_cursor();
     scroll_if_needed();
 }
 
@@ -154,6 +192,40 @@ void clear_screen(void)
         vidptr[i++] = 0x07;
     }
     current_loc = 0;
+}
+
+void cowsay(const char *msg) {
+    int len = strlen(msg);
+
+    kprint("+");
+    for (int i = 0; i < len + 2; i++) {
+        kprint("-");
+    }
+    kprint("+");
+    kprint_newline();
+
+    kprint("| ");
+    kprint(msg);
+    kprint(" |");
+    kprint_newline();
+
+    kprint("+");
+    for (int i = 0; i < len + 2; i++) {
+        kprint("-");
+    }
+    kprint("+");
+    kprint_newline();
+
+    kprint("   \\   ^__^");
+    kprint_newline();
+    kprint("    \\  (oo)\\_______");
+    kprint_newline();
+    kprint("       (__)\\       )\\/\\");
+    kprint_newline();
+    kprint("           ||----w |");
+    kprint_newline();
+    kprint("           ||     ||");
+    kprint_newline();
 }
 
 void process_command(const char *cmd) {
@@ -173,7 +245,12 @@ void process_command(const char *cmd) {
             kprint_newline();
             kprint("Cheese!");
         }
+    } else if(strncmp(cmd, "cowsay ", 7) == 0) {
+        kprint_newline();
+        const char *msg = cmd + 7;
+        cowsay(msg);
     } else {
+        kprint_newline();
         kprint("Unknown command");
         kprint_newline();
     }
@@ -219,6 +296,7 @@ void keyboard_handler_main(void)
                     current_loc -= 2;
                     vidptr[current_loc] = ' ';
                     vidptr[current_loc + 1] = 0x07;
+                    move_cursor();
                 } else {
                     current_loc = 0;
                 }
@@ -234,6 +312,7 @@ void keyboard_handler_main(void)
                 input_buffer[input_index++] = c;
                 vidptr[current_loc++] = c;
                 vidptr[current_loc++] = 0x07;
+                move_cursor();
                 scroll_if_needed();
             }
         }
@@ -245,7 +324,7 @@ void keyboard_handler_main(void)
 
 void kmain(void)
 {
-    const char *str = "my first kernel with keyboard support";
+    const char *str = "Welcome to Loonyx, the world's greatest operating system";
     clear_screen();
     kprint(str);
     kprint_newline();
