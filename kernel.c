@@ -18,10 +18,20 @@
 #define VGA_DATA_PORT    0x3D5
 
 #define INPUT_BUFFER_SIZE 128
+
+#define LEFT_SHIFT_MAKE 0x2A
+#define RIGHT_SHIFT_MAKE 0x36
+#define LEFT_SHIFT_BREAK 0xAA
+#define RIGHT_SHIFT_BREAK 0xB6
+
+/* Track if shift is currently pressed */
+int shift_pressed = 0;
+
 char input_buffer[INPUT_BUFFER_SIZE];
 int input_index = 0;
 
 extern unsigned char keyboard_map[128];
+extern unsigned char keyboard_map_shift[128];
 extern void keyboard_handler(void);
 /* treat port IO as unsigned bytes */
 extern unsigned char read_port(unsigned short port);
@@ -271,7 +281,21 @@ void keyboard_handler_main(void)
     if (status & 0x01) {
         keycode = read_port(KEYBOARD_DATA_PORT);
 
-        /* ignore break codes (key up) */
+        /* Handle Shift key press (make code) */
+        if (keycode == LEFT_SHIFT_MAKE || keycode == RIGHT_SHIFT_MAKE) {
+            shift_pressed = 1;
+            write_port(0x20, 0x20); /* EOI */
+            return;
+        }
+
+        /* Handle Shift key release (break code) */
+        if (keycode == LEFT_SHIFT_BREAK || keycode == RIGHT_SHIFT_BREAK) {
+            shift_pressed = 0;
+            write_port(0x20, 0x20); /* EOI */
+            return;
+        }
+
+        /* ignore other break codes (key up) */
         if (keycode & 0x80) {
             /* consume and ignore */
             write_port(0x20, 0x20); /* EOI */
@@ -297,8 +321,6 @@ void keyboard_handler_main(void)
                     vidptr[current_loc] = ' ';
                     vidptr[current_loc + 1] = 0x07;
                     move_cursor();
-                } else {
-                    current_loc = 0;
                 }
             }
             write_port(0x20, 0x20); /* EOI */
@@ -307,7 +329,9 @@ void keyboard_handler_main(void)
 
         /* Normal printable char: check mapping and buffer space */
         if (keycode < 128) {
-            char c = keyboard_map[keycode];
+            /* Use shift map if shift is pressed, otherwise use normal map */
+            unsigned char *map = shift_pressed ? keyboard_map_shift : keyboard_map;
+            char c = map[keycode];
             if (c && input_index < INPUT_BUFFER_SIZE - 1) {
                 input_buffer[input_index++] = c;
                 vidptr[current_loc++] = c;
